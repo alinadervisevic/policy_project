@@ -1,0 +1,260 @@
+------------------------------------------------------------------------------------------------------------------------
+      name:  AD
+       log:  /Users/alina/Documents/ECO 726_Policy/project.log
+  log type:  text
+ opened on:  15 Dec 2025, 15:48:55
+
+. 
+. import delimited using "cwhsc_min.csv", varnames(1) clear
+(encoding automatically selected: ISO-8859-1)
+(9 vars, 3,552 obs)
+
+. 
+. *=============================start of table replication=====================================================
+. gen numtype=.
+(3,552 missing values generated)
+
+. replace numtype=1 if type=="TAXAB" // column 1, FICA earnings
+(1,184 real changes made)
+
+. replace numtype=2 if type=="ADJ" // column 2, Adjusted FICA earnings
+(1,184 real changes made)
+
+. replace numtype=3 if type=="TOTAL" // column 3, total W-2 earnings
+(1,184 real changes made)
+
+. 
+. *collapsing average of variables
+. collapse (mean) var_cm nomearn cpi [w=smplsz], by(white byr year eligible numtype)
+(analytic weights assumed)
+
+. 
+. *reformatting elgibile and nonelgibile side by side
+. egen id=concat(white year numtype byr)
+
+. reshape wide nomearn var_cm, i(id) j(eligible)
+(j = 0 1)
+
+Data                               Long   ->   Wide
+-----------------------------------------------------------------------------
+Number of observations              144   ->   72          
+Number of variables                   9   ->   10          
+j variable (2 values)          eligible   ->   (dropped)
+xij variables:
+                                nomearn   ->   nomearn0 nomearn1
+                                 var_cm   ->   var_cm0 var_cm1
+-----------------------------------------------------------------------------
+
+. drop id
+
+. 
+. *making the tags for the columns
+. gen tag="f" if numtype==1 // f = FICA
+(48 missing values generated)
+
+. replace tag="a" if numtype==2 // a = Adjusted
+(24 real changes made)
+
+. replace tag="w" if numtype==3 // w = W=2 earnings
+(24 real changes made)
+
+. drop numtype
+
+. 
+. *reshaping data by tags
+. egen id=concat(white year byr)
+
+. reshape wide var* nomearn*, i(id) j(tag) string
+(j = a f w)
+
+Data                               Long   ->   Wide
+-----------------------------------------------------------------------------
+Number of observations               72   ->   24          
+Number of variables                  10   ->   17          
+j variable (3 values)               tag   ->   (dropped)
+xij variables:
+                                var_cm0   ->   var_cm0a var_cm0f var_cm0w
+                                var_cm1   ->   var_cm1a var_cm1f var_cm1w
+                               nomearn0   ->   nomearn0a nomearn0f nomearn0w
+                               nomearn1   ->   nomearn1a nomearn1f nomearn1w
+-----------------------------------------------------------------------------
+
+. drop id
+
+. 
+. *finding differences for eligible minus inelgilble, and SEs
+. gen cf=nomearn1f-nomearn0f // column 1
+
+.         gen sef=sqrt(var_cm1f+var_cm0f)
+
+. gen ca=nomearn1a-nomearn0a // column 2
+
+.         gen sea=sqrt(var_cm1a+var_cm0a)
+
+. gen cw=nomearn1w-nomearn0w // column 3
+
+.         gen sew=sqrt(var_cm1w+var_cm0w)
+
+.         
+. *organizing table
+. keep year byr white c* se* cpi 
+
+. expand 2 
+(24 observations created)
+
+. sort byr year 
+
+. 
+. *estimating the first stage estimates and SEs
+. gen sippp=0.159 if byr==50
+(32 missing values generated)
+
+. replace sippp=0.136 if byr==51
+(16 real changes made)
+
+. replace sippp=0.105 if byr==52
+(16 real changes made)
+
+. 
+. gen sippse=0.040 if byr==50
+(32 missing values generated)
+
+. replace sippse=0.043 if byr==51
+(16 real changes made)
+
+. replace sippse=0.050 if byr==52
+(16 real changes made)
+
+. 
+. *math for wald estimator (column 5)
+. gen serv_c=ca/(sippp*cpi)
+
+. gen serv_se=sea/(sippp*cpi)
+
+. 
+. *building matrices to be same format as replication code
+. mkmat year c* se* sipp* serv* if white==1, matrix(whites1)
+
+. mkmat year c* se* sipp* serv* if white==0, matrix(nonwhites1)
+
+. 
+. mat whites=J(rowsof(whites1),7,.)
+
+. mat nonwhites=J(rowsof(nonwhites1),7,.)
+
+. 
+. local top=rowsof(whites1)
+
+. local top1=`top'-1
+
+. 
+. *more formatting for matrices and for columns of the table
+. mat colnames whites= "Cohort" "Year" "FICA Earnings" "Adjusted FICA Earnings" "Total W-2 Earnings" "p^e-p^n" "Service 
+> Effect in 1978 $"
+
+. mat colnames nonwhites= "Cohort" "Year" "FICA Earnings" "Adjusted FICA Earnings" "Total W-2 Earnings" "p^e-p^n" "Servi
+> ce Effect in 1978 $"
+
+. 
+. foreach mat in whites nonwhites {
+  2.         forval val=1(2)`top1' {
+  3.                 mat `mat'[`val',2]=`mat'1[`val',"year"]
+  4.                 mat `mat'[`val',3]=`mat'1[`val',"cf"]
+  5.                 mat `mat'[`val',4]=`mat'1[`val',"ca"]
+  6.                 mat `mat'[`val',5]=`mat'1[`val',"cw"]
+  7.                 mat `mat'[`val',7]=`mat'1[`val',"serv_c"]
+  8.                 }
+  9.                 
+.         forval val=2(2)`top' {
+ 10.                 mat `mat'[`val',3]=`mat'1[`val',"sef"]
+ 11.                 mat `mat'[`val',4]=`mat'1[`val',"sea"]
+ 12.                 mat `mat'[`val',5]=`mat'1[`val',"sew"]
+ 13.                 mat `mat'[`val',7]=`mat'1[`val',"serv_se"]
+ 14.                 }       
+ 15. 
+.                 mat `mat'[1,1]=1950
+ 16.                 mat `mat'[9,1]=1951
+ 17.                 mat `mat'[17,1]=1952
+ 18.                 
+.                 mat `mat'[1,6]=0.159
+ 19.                 mat `mat'[2,6]=0.040
+ 20.                 mat `mat'[9,6]=0.136
+ 21.                 mat `mat'[10,6]=0.043
+ 22.                 mat `mat'[17,6]=0.105
+ 23.                 mat `mat'[18,6]=0.050
+ 24.                 }
+
+. 
+.                 mat li whites
+
+whites[24,7]
+           Cohort          Year  FICA Earni~s  Adjusted F~s  Total W-2 ~s       p^e-p^n  Service Ef~$
+ r1          1950            81    -435.83496     -487.8125    -589.66992          .159     -2200.863
+ r2             .             .     164.15129     197.66402     238.55423           .04     891.80054
+ r3             .            82    -320.19922    -396.10156    -305.53906             .    -1683.2466
+ r4             .             .     182.95425     239.17201     279.29358             .     1016.3693
+ r5             .            83    -349.57813    -450.12305    -512.94336             .    -1853.9376
+ r6             .             .     203.60326     253.35524     383.00021             .     1043.5032
+ r7             .            84    -484.39063    -638.75391    -1143.3164             .    -2523.4424
+ r8             .             .     220.18193     281.93665     426.33817             .     1113.8107
+ r9          1951            81    -358.32031    -428.76953    -71.613281          .136    -2261.6333
+r10             .             .     162.47559     178.50089     388.08148          .043     941.53973
+r11             .            82    -117.31055     -278.5918    -72.759766             .    -1384.1006
+r12             .             .     181.67262     209.13521     320.86853             .     1039.0262
+r13             .            83     -314.0625    -452.21875    -896.55078             .    -2177.5625
+r14             .             .     200.89677     230.94337     376.97162             .     1112.0583
+r15             .            84    -398.46289    -573.35938    -809.19531             .    -2648.1643
+r16             .             .     217.98288     253.71468     309.48083             .     1171.8273
+r17          1952            81    -342.88965    -392.67871    -440.53125          .105    -2682.7813
+r18             .             .     165.30219     181.78725     209.11827           .05     1241.9707
+r19             .            82    -235.11621    -255.29688    -514.70703             .     -1642.837
+r20             .             .     185.43869     211.95686     232.57573             .     1363.9438
+r21             .            83    -437.73828    -500.06445    -915.71484             .    -3118.8728
+r22             .             .       206.006     237.41264     342.70367             .     1480.7289
+r23             .            84     -436.0625    -560.06445    -767.24219             .    -3350.4695
+r24             .             .      222.4545     258.03094     304.86676             .     1543.6166
+
+.                 mat li nonwhites
+
+nonwhites[24,7]
+           Cohort          Year  FICA Earni~s  Adjusted F~s  Total W-2 ~s       p^e-p^n  Service Ef~$
+ r1          1950            81     534.52148     654.01074     802.58984          .159     2950.6995
+ r2             .             .     310.34824     412.91373      411.9938           .04     1862.9424
+ r3             .            82     285.15918      335.4209     326.04004             .     1425.3821
+ r4             .             .     344.43668     431.94843      478.9614             .      1835.579
+ r5             .            83      96.06543     169.08008     315.48047             .     696.39606
+ r6             .             .      388.2345      438.3913     598.18848             .     1805.6177
+ r7             .            84    -76.869141    -65.064453    -287.44336             .    -257.04172
+ r8             .             .     415.18704     483.83316     681.10565             .      1911.417
+ r9          1951            81      313.2041     401.50391     415.97656          .136     2117.8152
+r10             .             .     320.76868     355.84137     671.41614          .043     1876.9587
+r11             .            82     175.46875     228.06152    -244.34277             .      1133.056
+r12             .             .     360.07608     426.89474     534.25916             .     2120.8999
+r13             .            83     419.55664     398.91699     254.33008             .     1920.8992
+r14             .             .      412.9928     439.50446     652.52271             .     2116.3394
+r15             .            84     -223.1875    -293.48438    -718.60938             .    -1355.5109
+r16             .             .     434.80667     479.49097      648.1355             .      2214.616
+r17          1952            81    -305.85938    -316.54199    -272.36035          .105    -2162.6152
+r18             .             .     330.13818      362.8631     383.85968           .05     2479.0811
+r19             .            82    -262.56836     -502.5957    -160.21973             .    -3234.2065
+r20             .             .     359.72665     420.42969     457.70212             .     2705.4678
+r21             .            83    -177.33789    -275.86719    -53.635742             .    -1720.5676
+r22             .             .     411.51489     430.89175     513.87891             .     2687.4468
+r23             .            84    -123.39648    -99.755859    -288.09961             .    -596.76874
+r24             .             .     442.35803     482.41489     590.06891             .      2885.947
+
+.                 
+. * Angrist notes that final column 5 results are slightly different in published paper (SE are also slightly different)
+. 
+. *exporting to LaTex
+. esttab matrix(whites) using "table3_whites.tex", ///
+>     replace booktabs nonumber nomtitle collabels(none)
+(output written to table3_whites.tex)
+
+. 
+. log close AD
+      name:  AD
+       log:  /Users/alina/Documents/ECO 726_Policy/project.log
+  log type:  text
+ closed on:  15 Dec 2025, 15:48:56
+------------------------------------------------------------------------------------------------------------------------
